@@ -20,7 +20,8 @@ found on many phones, now on your desktop.
 
 ## Screenshots
 
-<!-- TODO: add screenshots of the Quick Settings toggle and Preferences window -->
+<img width="1120" height="753" alt="image" src="https://github.com/user-attachments/assets/4a5015bc-5a3b-4afb-9286-0520d9bec7d4" />
+
 
 ## Installation
 
