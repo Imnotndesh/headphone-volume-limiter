@@ -15,7 +15,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install dependencies (for glib-compile-schemas)
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libglib2.0-dev-bin zip
@@ -24,7 +24,7 @@ jobs:
         id: tag
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Extract extension UUID from metadata.json
+      - name: Extract extension UUID
         id: uuid
         run: |
           UUID=$(python3 -c "import json; print(json.load(open('metadata.json'))['uuid'])")
@@ -35,33 +35,42 @@ jobs:
           EXT_DIR="${{ steps.uuid.outputs.UUID }}"
           mkdir -p "$EXT_DIR"
 
-          # Copy all extension source files
+          # Required files
           cp extension.js "$EXT_DIR/"
           cp prefs.js "$EXT_DIR/"
           cp metadata.json "$EXT_DIR/"
 
-          # Copy lib directory if it exists
-          [ -d lib ] && cp -r lib "$EXT_DIR/"
+          # Lib (only the JS files, nothing else)
+          if [ -d lib ]; then
+            mkdir -p "$EXT_DIR/lib"
+            cp lib/*.js "$EXT_DIR/lib/"
+          fi
 
-          # Copy schemas and COMPILE them (MUST include compiled binary)
+          # Schemas — COPY XML THEN COMPILE (both needed)
           if [ -d schemas ]; then
-            cp -r schemas "$EXT_DIR/"
+            mkdir -p "$EXT_DIR/schemas"
+            cp schemas/*.gschema.xml "$EXT_DIR/schemas/"
             glib-compile-schemas "$EXT_DIR/schemas/"
           fi
 
-          # Copy icons if present
-          [ -d icons ] && cp -r icons "$EXT_DIR/"
+          # Icons (optional)
+          if [ -d icons ]; then
+            cp -r icons "$EXT_DIR/"
+          fi
 
-          # Copy translations if present
-          [ -d locale ] && cp -r locale "$EXT_DIR/"
+          # Translations (optional)
+          if [ -d locale ]; then
+            cp -r locale "$EXT_DIR/"
+          fi
 
-          # Create the zip (GNOME Extensions expects the UUID as the folder prefix)
-          zip -r "$EXT_DIR-v${{ steps.tag.outputs.VERSION }}.zip" "$EXT_DIR"
+          # Create zip — files at UUID-folder root (what EGO expects)
+          rm -f "$EXT_DIR-v${{ steps.tag.outputs.VERSION }}.zip"
+          (cd "$EXT_DIR" && zip -r "../$EXT_DIR-v${{ steps.tag.outputs.VERSION }}.zip" .)
 
-          echo "Created: $EXT_DIR-v${{ steps.tag.outputs.VERSION }}.zip"
-          ls -la "$EXT_DIR-v${{ steps.tag.outputs.VERSION }}.zip"
+          echo "=== Contents of release ZIP ==="
+          unzip -l "$EXT_DIR-v${{ steps.tag.outputs.VERSION }}.zip"
 
-      - name: Create GitHub Release & upload ZIP
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: "v${{ steps.tag.outputs.VERSION }}"

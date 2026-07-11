@@ -5,7 +5,7 @@
 
 A GNOME Shell extension that caps media volume when headphones (wired or
 Bluetooth) are the active audio output — the same hearing-safety feature
-found on many phones, now on your desktop.
+found on many phones, now on your Gnome desktop.
 
 ## Features
 
