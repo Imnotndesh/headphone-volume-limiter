@@ -1,0 +1,69 @@
+name: Build Release ZIP
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (for glib-compile-schemas)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev-bin zip
+
+      - name: Extract tag version
+        id: tag
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Extract extension UUID from metadata.json
+        id: uuid
+        run: |
+          UUID=$(python3 -c "import json; print(json.load(open('metadata.json'))['uuid'])")
+          echo "UUID=$UUID" >> $GITHUB_OUTPUT
+
+      - name: Build release ZIP
+        run: |
+          EXT_DIR="${{ steps.uuid.outputs.UUID }}"
+          mkdir -p "$EXT_DIR"
+
+          # Copy all extension source files
+          cp extension.js "$EXT_DIR/"
+          cp prefs.js "$EXT_DIR/"
+          cp metadata.json "$EXT_DIR/"
+
+          # Copy lib directory if it exists
+          [ -d lib ] && cp -r lib "$EXT_DIR/"
+
+          # Copy schemas and COMPILE them (MUST include compiled binary)
+          if [ -d schemas ]; then
+            cp -r schemas "$EXT_DIR/"
+            glib-compile-schemas "$EXT_DIR/schemas/"
+          fi
+
+          # Copy icons if present
+          [ -d icons ] && cp -r icons "$EXT_DIR/"
+
+          # Copy translations if present
+          [ -d locale ] && cp -r locale "$EXT_DIR/"
+
+          # Create the zip (GNOME Extensions expects the UUID as the folder prefix)
+          zip -r "$EXT_DIR-v${{ steps.tag.outputs.VERSION }}.zip" "$EXT_DIR"
+
+          echo "Created: $EXT_DIR-v${{ steps.tag.outputs.VERSION }}.zip"
+          ls -la "$EXT_DIR-v${{ steps.tag.outputs.VERSION }}.zip"
+
+      - name: Create GitHub Release & upload ZIP
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "v${{ steps.tag.outputs.VERSION }}"
+          files: "${{ steps.uuid.outputs.UUID }}-v${{ steps.tag.outputs.VERSION }}.zip"
+          generate_release_notes: true
