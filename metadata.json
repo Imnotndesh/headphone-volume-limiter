@@ -1,0 +1,10 @@
+{
+  "uuid": "headphone-volume-limiter@brian.local",
+  "name": "Headphone Volume Limiter",
+  "description": "Limits media volume when headphones (wired or Bluetooth) are connected, similar to the feature on some phones. Configurable threshold, per-device targeting, and warn/block behavior.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "url": "",
+  "version-name": "0.1.0",
+  "settings-schema": "org.gnome.shell.extensions.headphone-volume-limiter",
+  "gettext-domain": "headphone-volume-limiter"
+}
