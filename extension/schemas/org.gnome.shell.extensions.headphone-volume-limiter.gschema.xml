@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="headphone-volume-limiter">
+  <schema id="org.gnome.shell.extensions.headphone-volume-limiter"
+          path="/org/gnome/shell/extensions/headphone-volume-limiter/">
+
+    <!-- Item 5: quick-toggle master switch -->
+    <key name="enabled" type="b">
+      <default>false</default>
+      <summary>Master enable/disable</summary>
+      <description>
+        Whether the volume limiter is active at all. Mirrored by the
+        Quick Settings toggle.
+      </description>
+    </key>
+
+    <!-- Item 1: threshold -->
+    <key name="limit-percent" type="i">
+      <range min="1" max="100"/>
+      <default>70</default>
+      <summary>Volume limit percentage</summary>
+      <description>
+        The maximum percentage of the volume bar allowed when a
+        matching headphone device is active.
+      </description>
+    </key>
+
+    <!-- Item 2: action mode -->
+    <key name="action-mode" type="s">
+      <choices>
+        <choice value="warn-prompt"/>
+        <choice value="warn-allow"/>
+        <choice value="block"/>
+      </choices>
+      <default>"warn-prompt"</default>
+      <summary>What happens when the user tries to exceed the limit</summary>
+      <description>
+        warn-prompt: clamp back to the limit and show a notification
+        with an "Allow anyway" action for this session.
+        warn-allow: show a notification but let the volume go through.
+        block: silently clamp back to the limit, no notification.
+      </description>
+    </key>
+
+    <!-- Item 3: device targeting -->
+    <key name="device-mode" type="s">
+      <choices>
+        <choice value="all-headphones"/>
+        <choice value="specific"/>
+      </choices>
+      <default>"all-headphones"</default>
+      <summary>Whether to limit all headphone-like outputs or one specific device</summary>
+    </key>
+
+    <key name="specific-device-id" type="s">
+      <default>""</default>
+      <summary>Identifier of the specific device to limit</summary>
+      <description>
+        Only used when device-mode is "specific". For Bluetooth devices
+        this is the MAC address (e.g. 78:15:2D:56:69:F4). For the wired
+        jack, this is the literal string "wired-jack".
+      </description>
+    </key>
+
+    <key name="specific-device-label" type="s">
+      <default>""</default>
+      <summary>Human-readable label of the specific device, for display in prefs</summary>
+    </key>
+
+    <!-- Session-only "allow anyway" overrides are kept in memory in
+         extension.js, not persisted here — they're meant to reset on
+         device reconnect / shell restart, not survive as permanent state. -->
+
+  </schema>
+</schemalist>
