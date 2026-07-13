@@ -140,6 +140,7 @@ export default class HeadphoneVolumeLimiterExtension extends Extension {
 
         // --- Notification source (item 4) ---
         this._notifSource = null;
+        this._notifSourceDestroyId = null; 
 
         // --- Session-only "allow anyway" overrides ---
         // Keyed by device id (mac / "wired-jack"). Cleared whenever that
@@ -298,10 +299,16 @@ export default class HeadphoneVolumeLimiterExtension extends Extension {
             this._indicator = null;
         }
 
+        if (this._notifSourceDestroyId) {
+            this._notifSource.disconnect(this._notifSourceDestroyId);
+            this._notifSourceDestroyId = null;
+        }
+        
         if (this._notifSource) {
             this._notifSource.destroy();
             this._notifSource = null;
         }
+
 
         this._sessionOverrides.clear();
         this._settings = null;
@@ -487,11 +494,13 @@ export default class HeadphoneVolumeLimiterExtension extends Extension {
             iconName: 'audio-headphones-symbolic',
         });
         Main.messageTray.add(this._notifSource);
-        this._notifSource.connect('destroy', () => {
+        this._notifSourceDestroyId = this._notifSource.connect('destroy', () => {
+            this._notifSourceDestroyId = null;
             this._notifSource = null;
         });
         return this._notifSource;
     }
+
 
     _notify(title, body) {
         const source = this._getNotifSource();
