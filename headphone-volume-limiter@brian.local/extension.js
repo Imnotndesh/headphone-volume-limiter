@@ -7,56 +7,54 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 import { QuickToggle, SystemIndicator } from 'resource:///org/gnome/shell/ui/quickSettings.js';
 
-function getStreamPortSafely(stream) {
-    const ports = stream.get_ports ? stream.get_ports() : [];
-    const hasPorts = Array.isArray(ports) && ports.length > 0;
-    const port = hasPorts ? stream.get_port() : null;
-    return { ports, hasPorts, port };
-}
+const NOTIF_TITLE = 'Headphone Volume Limiter';
 
-function classifyDeviceKind(stream) {
+function classifyDevice(stream) {
     const name = (stream.get_name?.() ?? '').toLowerCase();
-    const { hasPorts, port } = getStreamPortSafely(stream);
+    const ports = stream.get_ports ? stream.get_ports() : [];
 
-    if (!hasPorts) return 'virtual';
+    if (!ports || ports.length === 0)
+        return 'virtual';
 
+    const port = stream.get_port();
     const portId = (port?.port ?? '').toLowerCase();
-    const portHuman = (port?.human_port ?? '').toLowerCase();
-    const isBluetooth = name.includes('bluez') || name.includes('bluetooth');
-    const looksLikeHeadphones =
-        portId.includes('headphone') ||
+    const portName = (port?.human_port ?? '').toLowerCase();
+
+    if (name.includes('bluez') || name.includes('bluetooth'))
+        return 'bluetooth-headphones';
+
+    const soundsLikeHeadphones = portId.includes('headphone') ||
         portId.includes('headset') ||
-        portHuman.includes('headphone') ||
-        portHuman.includes('headset') ||
+        portName.includes('headphone') ||
+        portName.includes('headset') ||
         name.includes('headphone');
 
-    if (isBluetooth) return 'bluetooth-headphones';
-    if (looksLikeHeadphones) return 'wired-headphones';
+    if (soundsLikeHeadphones)
+        return 'wired-headphones';
+
     return 'speaker-or-other';
 }
 
-function isHeadphoneKind(kind) {
+function isHeadphones(kind) {
     return kind === 'bluetooth-headphones' || kind === 'wired-headphones';
 }
 
-function extractBluetoothMac(stream) {
-    const name = stream.get_name?.() ?? '';
+function bluetoothMacFromName(name) {
     const match = name.match(/bluez_output\.([0-9A-Fa-f_]{17})\./);
-    if (!match) return null;
-    return match[1].replace(/_/g, ':').toUpperCase();
+    return match ? match[1].replace(/_/g, ':').toUpperCase() : null;
 }
 
-function getDeviceId(stream, kind) {
-    if (kind === 'bluetooth-headphones') return extractBluetoothMac(stream);
-    if (kind === 'wired-headphones') return 'wired-jack';
+function deviceIdFor(stream, kind) {
+    if (kind === 'bluetooth-headphones')
+        return bluetoothMacFromName(stream.get_name?.() ?? '');
+    if (kind === 'wired-headphones')
+        return 'wired-jack';
     return null;
 }
 
-function getDeviceLabel(stream) {
+function labelFor(stream) {
     return stream.get_description?.() ?? stream.get_name?.() ?? 'Unknown device';
 }
-
-const NOTIFICATION_SOURCE_TITLE = 'Headphone Volume Limiter';
 
 const HeadphoneLimiterToggle = GObject.registerClass(
 class HeadphoneLimiterToggle extends QuickToggle {
@@ -67,13 +65,7 @@ class HeadphoneLimiterToggle extends QuickToggle {
             toggleMode: true,
         });
 
-        this._settings = settings;
-        this._settings.bind(
-            'enabled',
-            this,
-            'checked',
-            Gio.SettingsBindFlags.DEFAULT
-        );
+        settings.bind('enabled', this, 'checked', Gio.SettingsBindFlags.DEFAULT);
     }
 });
 
@@ -98,7 +90,7 @@ export default class HeadphoneVolumeLimiterExtension extends Extension {
         this._sessionOverrides = new Set();
         this._isClamping = false;
 
-        this._isReady = false;
+        this._ready = false;
         this._streamHandlers = new Map();
         this._activeStreamId = null;
 
@@ -106,42 +98,45 @@ export default class HeadphoneVolumeLimiterExtension extends Extension {
 
         this._control.connectObject(
             'state-changed', (control, state) => {
-                if (state === Gvc.MixerControlState.READY) {
-                    this._isReady = true;
-                    this._attachAllStreams();
-                    this._onActiveOutputChanged(control.get_default_sink());
-                }
+                if (state !== Gvc.MixerControlState.READY)
+                    return;
+                this._ready = true;
+                this._attachAllStreams();
+                this._onActiveOutputChanged(control.get_default_sink());
             },
             'output-added', (control, id) => {
-                if (!this._isReady) return;
+                if (!this._ready)
+                    return;
                 const uiDevice = control.lookup_output_id(id);
-                if (!uiDevice) return;
-                const streamId = uiDevice.stream_id;
-                const stream = control.lookup_stream_id(streamId);
+                if (!uiDevice)
+                    return;
+                const stream = control.lookup_stream_id(uiDevice.stream_id);
                 if (stream instanceof Gvc.MixerSink)
                     this._attachStream(stream);
             },
             'output-removed', (control, id) => {
                 const uiDevice = control.lookup_output_id(id);
                 if (uiDevice)
-                    this._detachStreamById(uiDevice.stream_id);
+                    this._detachStream(uiDevice.stream_id);
             },
             'active-output-update', (control, id) => {
-                if (!this._isReady) return;
-                const stream = control.lookup_stream_id(id);
-                this._onActiveOutputChanged(stream);
+                if (!this._ready)
+                    return;
+                this._onActiveOutputChanged(control.lookup_stream_id(id));
             },
             this
         );
 
         this._control.open();
-
         this._debug('enabled');
     }
 
     disable() {
         for (const { stream, id } of this._streamHandlers.values()) {
-            try { stream.disconnect(id); } catch (e) { }
+            try {
+                stream.disconnect(id);
+            } catch (e) {
+            }
         }
         this._streamHandlers.clear();
 
@@ -149,20 +144,16 @@ export default class HeadphoneVolumeLimiterExtension extends Extension {
         this._control?.close();
         this._control = null;
 
-        if (this._indicator) {
-            this._indicator.quickSettingsItems.forEach(item => item.destroy());
-            this._indicator.destroy();
-            this._indicator = null;
-        }
+        this._indicator?.quickSettingsItems.forEach(item => item.destroy());
+        this._indicator?.destroy();
+        this._indicator = null;
 
         if (this._notifSourceDestroyId) {
             this._notifSource.disconnect(this._notifSourceDestroyId);
             this._notifSourceDestroyId = null;
         }
-        if (this._notifSource) {
-            this._notifSource.destroy();
-            this._notifSource = null;
-        }
+        this._notifSource?.destroy();
+        this._notifSource = null;
 
         this._sessionOverrides.clear();
         this._settings = null;
@@ -175,28 +166,33 @@ export default class HeadphoneVolumeLimiterExtension extends Extension {
     }
 
     _attachAllStreams() {
-        const sinks = this._control.get_sinks();
-        for (const stream of sinks)
+        for (const stream of this._control.get_sinks())
             this._attachStream(stream);
     }
 
     _attachStream(stream) {
-        if (!stream) return;
-        const id = stream.get_id();
-        if (this._streamHandlers.has(id)) return;
+        if (!stream)
+            return;
 
-        const handlerId = stream.connect('notify::volume', () => {
-            this._onStreamVolumeChanged(stream);
-        });
+        const id = stream.get_id();
+        if (this._streamHandlers.has(id))
+            return;
+
+        const handlerId = stream.connect('notify::volume', () => this._onStreamVolumeChanged(stream));
         this._streamHandlers.set(id, { stream, id: handlerId });
     }
 
-    _detachStreamById(id) {
+    _detachStream(id) {
         const entry = this._streamHandlers.get(id);
-        if (entry) {
-            try { entry.stream.disconnect(entry.id); } catch (e) { }
-            this._streamHandlers.delete(id);
+        if (!entry)
+            return;
+
+        try {
+            entry.stream.disconnect(entry.id);
+        } catch (e) {
+        
         }
+        this._streamHandlers.delete(id);
         this._sessionOverrides.clear();
     }
 
@@ -209,55 +205,58 @@ export default class HeadphoneVolumeLimiterExtension extends Extension {
         this._onStreamVolumeChanged(stream);
     }
 
-    _findConnectedHeadphoneStream() {
+    _findConnectedHeadphones() {
         for (const { stream } of this._streamHandlers.values()) {
             try {
-                const kind = classifyDeviceKind(stream);
-                if (isHeadphoneKind(kind)) return stream;
-            } catch (e) { }
+                if (isHeadphones(classifyDevice(stream)))
+                    return stream;
+            } catch (e) {
+               
+            }
         }
         return null;
     }
 
     _onStreamVolumeChanged(stream) {
-        if (this._isClamping) return;
-        if (!this._settings.get_boolean('enabled')) return;
+        if (this._isClamping)
+            return;
+        if (!this._settings.get_boolean('enabled'))
+            return;
+        if (stream.get_id() !== this._activeStreamId)
+            return;
 
-        if (stream.get_id() !== this._activeStreamId) return;
+        const kind = classifyDevice(stream);
+        let deviceId = deviceIdFor(stream, kind);
 
-        const kind = classifyDeviceKind(stream);
-        let effectiveDeviceId = getDeviceId(stream, kind);
-
-        if (!isHeadphoneKind(kind)) {
-            if (kind === 'virtual') {
-                const connectedHeadphone = this._findConnectedHeadphoneStream();
-                if (!connectedHeadphone) return;
-                this._debug('virtual stream proxying headphone', getDeviceLabel(connectedHeadphone));
-                effectiveDeviceId = getDeviceId(connectedHeadphone, classifyDeviceKind(connectedHeadphone));
-            } else {
+        if (!isHeadphones(kind)) {
+            if (kind !== 'virtual')
                 return;
-            }
+
+            const headphones = this._findConnectedHeadphones();
+            if (!headphones)
+                return;
+
+            this._debug('virtual stream proxying headphone', labelFor(headphones));
+            deviceId = deviceIdFor(headphones, classifyDevice(headphones));
         }
 
-        const deviceId = effectiveDeviceId;
-
-        const deviceMode = this._settings.get_string('device-mode');
-        if (deviceMode === 'specific') {
+        if (this._settings.get_string('device-mode') === 'specific') {
             const target = this._settings.get_string('specific-device-id');
-            if (deviceId !== target) return;
+            if (deviceId !== target)
+                return;
         }
 
-        if (deviceId && this._sessionOverrides.has(deviceId)) return;
+        if (deviceId && this._sessionOverrides.has(deviceId))
+            return;
 
         const limitPercent = this._settings.get_int('limit-percent');
-        const maxNorm = this._control.get_vol_max_norm();
-        const limitVolume = Math.round((limitPercent / 100) * maxNorm);
+        const limitVolume = Math.round((limitPercent / 100) * this._control.get_vol_max_norm());
 
-        const currentVolume = stream.get_volume();
-        if (currentVolume <= limitVolume) return;
+        if (stream.get_volume() <= limitVolume)
+            return;
 
         const actionMode = this._settings.get_string('action-mode');
-        const label = getDeviceLabel(stream);
+        const label = labelFor(stream);
 
         if (actionMode === 'warn-allow') {
             this._notify(
@@ -269,7 +268,8 @@ export default class HeadphoneVolumeLimiterExtension extends Extension {
 
         this._clampVolume(stream, limitVolume);
 
-        if (actionMode === 'block') return;
+        if (actionMode === 'block')
+            return;
 
         this._notifyWithAllowAction(label, limitPercent, deviceId);
     }
@@ -285,10 +285,11 @@ export default class HeadphoneVolumeLimiterExtension extends Extension {
     }
 
     _getNotifSource() {
-        if (this._notifSource) return this._notifSource;
+        if (this._notifSource)
+            return this._notifSource;
 
         this._notifSource = new MessageTray.Source({
-            title: NOTIFICATION_SOURCE_TITLE,
+            title: NOTIF_TITLE,
             iconName: 'audio-headphones-symbolic',
         });
         Main.messageTray.add(this._notifSource);
@@ -301,8 +302,7 @@ export default class HeadphoneVolumeLimiterExtension extends Extension {
 
     _notify(title, body) {
         const source = this._getNotifSource();
-        const notification = new MessageTray.Notification({ source, title, body });
-        source.addNotification(notification);
+        source.addNotification(new MessageTray.Notification({ source, title, body }));
     }
 
     _notifyWithAllowAction(deviceLabel, limitPercent, deviceId) {
